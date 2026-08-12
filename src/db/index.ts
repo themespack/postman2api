@@ -1,16 +1,26 @@
-import { drizzle } from "drizzle-orm/bun-sqlite";
-import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema";
-import { config } from "../config";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
 
-mkdirSync(dirname(config.databasePath), { recursive: true });
+export type DB = ReturnType<typeof drizzle<typeof schema>>;
 
-const sqlite = new Database(config.databasePath, { create: true });
-sqlite.exec("PRAGMA journal_mode = WAL;");
-sqlite.exec("PRAGMA foreign_keys = ON;");
+let instance: DB | null = null;
 
-export const db = drizzle(sqlite, { schema });
-export { sqlite as client };
-export type DB = typeof db;
+export function initDb(d1: D1Database): DB {
+  instance = drizzle(d1, { schema });
+  return instance;
+}
+
+/**
+ * Proxy that forwards to the D1-backed instance initialized per-request via
+ * initDb(). Lets every module keep using `db.select()...` unchanged instead
+ * of threading the instance through every function signature.
+ */
+export const db = new Proxy({} as DB, {
+  get(_target, prop, _receiver) {
+    if (!instance) {
+      throw new Error("Database not initialized — call initDb(env.DB) before using `db`");
+    }
+    const value = (instance as any)[prop];
+    return typeof value === "function" ? value.bind(instance) : value;
+  },
+});

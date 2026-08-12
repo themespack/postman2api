@@ -1,23 +1,27 @@
 #!/usr/bin/env bun
 /**
- * postman2api CLI
+ * postman2api CLI — operates against the local D1 database emulated by
+ * Wrangler (the same one `wrangler dev` uses), via getPlatformProxy().
  *
  * Usage:
- *   bun src/cli.ts serve [--port 1930]        Start server
- *   bun src/cli.ts login <email> <password>   Login Postman account via browser
+ *   bun src/cli.ts login <email> <password>   Login Postman account via browser (Camoufox)
  *   bun src/cli.ts accounts                    List accounts
  *   bun src/cli.ts quota                       Check account quotas
  *   bun src/cli.ts status                      Show config overview
  *   bun src/cli.ts set-admin-key <key>         Set admin password
+ *
+ * To run the server itself, use `wrangler dev` / `wrangler deploy`.
+ * To apply the D1 schema, use `wrangler d1 migrations apply DB --local|--remote`.
  */
 
-import { db } from "./db/index";
+import { getPlatformProxy } from "wrangler";
 import { accounts, settings } from "./db/schema";
 import { eq } from "drizzle-orm";
-import { config } from "./config";
+import { initDb, db } from "./db/index";
+import { initConfig, config, type Env } from "./config";
+import { initWs } from "./ws/index";
 import { loginPostmanAccount } from "./auth/bridge";
 import { warmupAccount } from "./auth/warmup";
-import { encrypt } from "./utils/crypto";
 
 const C: Record<string, string> = {
   reset: "\x1b[0m", green: "\x1b[32m", yellow: "\x1b[33m",
@@ -29,25 +33,18 @@ function c(text: string, color: string): string {
 }
 
 function usage(): void {
-  console.log(`postman2api
+  console.log(`postman2api CLI
 
 Usage:
-  bun src/cli.ts serve [--port 1930]        Start server
   bun src/cli.ts login <email> <password>   Login Postman via browser (Camoufox)
   bun src/cli.ts accounts                    List accounts
   bun src/cli.ts quota                       Check account quotas
   bun src/cli.ts status                      Show config overview
   bun src/cli.ts set-admin-key <key>         Set admin password
-  bun src/cli.ts migrate                     Run database migration
-`);
-}
 
-async function cmdServe(args: string[]): Promise<void> {
-  if ("--port" in args) {
-    const i = args.indexOf("--port");
-    if (i + 1 < args.length) (config as any).port = Number(args[i + 1]);
-  }
-  await import("./index");
+Run the server with: wrangler dev / wrangler deploy
+Apply the schema with: wrangler d1 migrations apply DB --local|--remote
+`);
 }
 
 async function cmdLogin(args: string[]): Promise<void> {
@@ -58,7 +55,7 @@ async function cmdLogin(args: string[]): Promise<void> {
   const [email, password] = args;
   const headless = args.includes("--headless");
   console.log(c(`Logging in ${email} via Camoufox (headless=${headless})...`, "cyan"));
-  const result = await loginPostmanAccount(email, password, headless, (log) => {
+  const result = await loginPostmanAccount(email!, password!, headless, (log) => {
     console.log(c(`  [${log.step}]`, "blue") + ` ${log.msg}`);
   });
   if (result.success) {
@@ -99,12 +96,7 @@ async function cmdQuota(): Promise<void> {
 
 async function cmdStatus(): Promise<void> {
   console.log(c("\n--- postman2api Status ---", "cyan"));
-  console.log(`Database      : ${c(config.databasePath, "blue")}`);
-  console.log(`Port          : ${c(String(config.port), "blue")}`);
-  console.log(`Admin Key     : ${"Set"}`);
   console.log(`API Key       : ${config.apiKey}`);
-  console.log(`Browser       : ${c(config.browserEngine, "blue")}`);
-  console.log(`Python Path   : ${c(config.pythonPath, "blue")}`);
 
   const allAccounts = await db.select().from(accounts);
   const active = allAccounts.filter((a) => a.status === "active" && a.enabled);
@@ -128,18 +120,25 @@ async function main() {
   }
   const [cmd, ...rest] = argv;
 
-  switch (cmd) {
-    case "serve": await cmdServe(rest); break;
-    case "login": await cmdLogin(rest); break;
-    case "accounts": await cmdAccounts(); break;
-    case "quota": await cmdQuota(); break;
-    case "status": await cmdStatus(); break;
-    case "set-admin-key": await cmdSetAdminKey(rest); break;
-    case "migrate": await import("./db/migrate"); break;
-    case "help":
-    case "-h":
-    case "--help": usage(); break;
-    default: console.log(c(`Unknown command: ${cmd}`, "red")); usage();
+  const proxy = await getPlatformProxy<Env>();
+  initDb(proxy.env.DB);
+  initConfig(proxy.env);
+  initWs(proxy.env);
+
+  try {
+    switch (cmd) {
+      case "login": await cmdLogin(rest); break;
+      case "accounts": await cmdAccounts(); break;
+      case "quota": await cmdQuota(); break;
+      case "status": await cmdStatus(); break;
+      case "set-admin-key": await cmdSetAdminKey(rest); break;
+      case "help":
+      case "-h":
+      case "--help": usage(); break;
+      default: console.log(c(`Unknown command: ${cmd}`, "red")); usage();
+    }
+  } finally {
+    await proxy.dispose();
   }
 }
 

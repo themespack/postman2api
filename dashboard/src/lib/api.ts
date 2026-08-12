@@ -46,13 +46,6 @@ export async function fetchAccounts(): Promise<{ data: Account[] }> {
   return api("/api/accounts");
 }
 
-export async function loginAccount(email: string, password: string, headless: boolean): Promise<{ success: boolean }> {
-  return api("/api/accounts/login", {
-    method: "POST",
-    body: JSON.stringify({ email, password, headless }),
-  });
-}
-
 export async function addAccountManual(email: string, tokens: any): Promise<{ success: boolean }> {
   return api("/api/accounts", {
     method: "POST",

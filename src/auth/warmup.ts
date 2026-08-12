@@ -4,8 +4,6 @@ import { eq } from "drizzle-orm";
 import { PostmanProvider } from "../provider/postman";
 
 const provider = new PostmanProvider();
-const WARMUP_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
-let warmupTimer: ReturnType<typeof setInterval> | null = null;
 
 export async function warmupAccount(accountId: number): Promise<{ success: boolean; error?: string }> {
   const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
@@ -41,22 +39,5 @@ export async function warmupAllAccounts(): Promise<void> {
     } catch (err) {
       console.error(`[warmup] Account ${account.email} failed:`, err);
     }
-  }
-}
-
-export function startWarmupScheduler(): void {
-  if (warmupTimer) clearInterval(warmupTimer);
-  warmupTimer = setInterval(() => {
-    warmupAllAccounts().catch((err) => {
-      console.error("[warmup] Scheduler error:", err);
-    });
-  }, WARMUP_INTERVAL_MS);
-  console.log(`[warmup] Scheduler started (interval: ${WARMUP_INTERVAL_MS / 1000}s)`);
-}
-
-export function stopWarmupScheduler(): void {
-  if (warmupTimer) {
-    clearInterval(warmupTimer);
-    warmupTimer = null;
   }
 }

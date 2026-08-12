@@ -3,7 +3,6 @@ import {
   fetchAccounts,
   fetchStats,
   fetchSettings,
-  loginAccount,
   deleteAccount,
   warmupAccount,
   toggleAccount,
@@ -174,7 +173,7 @@ function AccountsTab({
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [addMode, setAddMode] = useState<"login" | "manual">("login");
+  const [addMode, setAddMode] = useState<"login" | "manual">("manual");
   const [filter, setFilter] = useState("all");
   const [confirm, setConfirm] = useState<{ msg: string; action: () => void } | null>(null);
   const [warming, setWarming] = useState<Set<number>>(new Set());
@@ -196,7 +195,8 @@ function AccountsTab({
 
   useEffect(() => {
     load();
-    const ws = new WebSocket(`ws://${location.host}`);
+    const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
     ws.onmessage = (ev) => {
       const data = JSON.parse(ev.data);
       if (data.type === "login_log") {
@@ -484,23 +484,15 @@ function AddAccountModal({
   onLoginStart: () => void;
 }) {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [tokens, setTokens] = useState("");
   const [loading, setLoading] = useState(false);
-  const [headless, setHeadless] = useState(false);
 
   const submit = async () => {
     setLoading(true);
     try {
-      if (mode === "login") {
-        onLoginStart();
-        await loginAccount(email, password, headless);
-        showToast("Login successful, account added", "success");
-      } else {
-        const parsed = JSON.parse(tokens);
-        await addAccountManual(email, parsed);
-        showToast("Account added", "success");
-      }
+      const parsed = JSON.parse(tokens);
+      await addAccountManual(email, parsed);
+      showToast("Account added", "success");
       onDone();
     } catch (e: any) {
       showToast(e.message, "error");
@@ -515,46 +507,47 @@ function AddAccountModal({
         <div className="modal-title">Add Postman Account</div>
         <div className="filter-bar" style={{ marginBottom: 16 }}>
           <button className={`filter-chip ${mode === "login" ? "active" : ""}`} onClick={() => setMode("login")}>
-            Browser Login
+            Browser Login (CLI)
           </button>
           <button className={`filter-chip ${mode === "manual" ? "active" : ""}`} onClick={() => setMode("manual")}>
             Manual Token
           </button>
         </div>
         <div className="dialog-body">
-          <div className="dialog-field">
-            <span className="dialog-label">Email</span>
-            <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="user@example.com" />
-          </div>
           {mode === "login" ? (
+            <div className="dialog-help">
+              Browser-automated login runs Python + Camoufox, which can't run inside a Cloudflare Worker. Run this
+              locally instead, then switch to the "Manual Token" tab and paste the tokens it prints:
+              <pre style={{ marginTop: 8, padding: 8, fontSize: 12, whiteSpace: "pre-wrap", background: "var(--surface-2, #1118)" }}>
+                bun src/cli.ts login {"<email>"} {"<password>"}
+              </pre>
+            </div>
+          ) : (
             <>
               <div className="dialog-field">
-                <span className="dialog-label">Password</span>
-                <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                <span className="dialog-label">Email</span>
+                <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="user@example.com" />
               </div>
-              <label className="headless-toggle">
-                <input type="checkbox" checked={headless} onChange={(e) => setHeadless(e.target.checked)} />
-                <span>Headless mode (no visible browser window)</span>
-              </label>
+              <div>
+                <div className="dialog-help">Postman tokens JSON (postman_sid, user_id, workspace_id, workspace_subdomain)</div>
+                <textarea
+                  className="input"
+                  style={{ minHeight: 100, fontFamily: "ui-monospace,monospace", fontSize: 12 }}
+                  value={tokens}
+                  onChange={(e) => setTokens(e.target.value)}
+                  placeholder='{"postman_sid":"...","user_id":"...","workspace_id":"...","workspace_subdomain":"..."}'
+                />
+              </div>
             </>
-          ) : (
-            <div>
-              <div className="dialog-help">Postman tokens JSON (postman_sid, user_id, workspace_id, workspace_subdomain)</div>
-              <textarea
-                className="input"
-                style={{ minHeight: 100, fontFamily: "ui-monospace,monospace", fontSize: 12 }}
-                value={tokens}
-                onChange={(e) => setTokens(e.target.value)}
-                placeholder='{"postman_sid":"...","user_id":"...","workspace_id":"...","workspace_subdomain":"..."}'
-              />
-            </div>
           )}
         </div>
         <div className="dialog-actions">
           <button className="dialog-btn" onClick={onClose}>Cancel</button>
-          <button className="dialog-btn dialog-btn-primary" disabled={loading} onClick={submit}>
-            {loading ? "Working..." : mode === "login" ? "Login" : "Add"}
-          </button>
+          {mode === "manual" && (
+            <button className="dialog-btn dialog-btn-primary" disabled={loading} onClick={submit}>
+              {loading ? "Working..." : "Add"}
+            </button>
+          )}
         </div>
       </div>
     </div>

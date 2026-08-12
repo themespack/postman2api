@@ -8,9 +8,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://localhost:1930",
-      "/v1": "http://localhost:1930",
-      "/health": "http://localhost:1930",
+      "/api": "http://localhost:8787",
+      "/v1": "http://localhost:8787",
+      "/health": "http://localhost:8787",
+      "/ws": { target: "ws://localhost:8787", ws: true },
     },
   },
 });

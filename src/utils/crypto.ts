@@ -1,56 +1,51 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { config } from "../config";
+import { config, DEFAULT_ENCRYPTION_KEY_VALUE } from "../config";
 
 const VERSION_AES_GCM = 0x01;
 const IV_LENGTH = 12;
-const AUTH_TAG_LENGTH = 16;
-const DEFAULT_ENCRYPTION_KEY = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6";
 
-function deriveKey(): Buffer {
-  return createHash("sha256").update(config.encryptionKey, "utf8").digest();
+async function deriveKey(): Promise<CryptoKey> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(config.encryptionKey));
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
-function getLegacyKeyBytes(): Uint8Array {
-  return new TextEncoder().encode(config.encryptionKey);
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
 }
 
-function legacyXorDecrypt(data: Uint8Array): string {
-  const key = getLegacyKeyBytes();
-  if (key.length === 0) throw new Error("Encryption key must not be empty");
-  const decrypted = new Uint8Array(data.length);
-  for (let i = 0; i < data.length; i++) {
-    decrypted[i] = data[i]! ^ key[i % key.length]!;
+function fromBase64(b64: string): Uint8Array {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+export async function encrypt(plaintext: string): Promise<string> {
+  const key = await deriveKey();
+  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(plaintext)),
+  );
+  const payload = new Uint8Array(1 + IV_LENGTH + ciphertext.length);
+  payload[0] = VERSION_AES_GCM;
+  payload.set(iv, 1);
+  payload.set(ciphertext, 1 + IV_LENGTH);
+  return toBase64(payload);
+}
+
+export async function decrypt(ciphertext: string): Promise<string> {
+  const data = fromBase64(ciphertext);
+  if (data.length < 1 + IV_LENGTH || data[0] !== VERSION_AES_GCM) {
+    throw new Error("Unsupported ciphertext format");
   }
-  return new TextDecoder().decode(decrypted);
-}
-
-export function encrypt(plaintext: string): string {
-  const key = deriveKey();
-  const iv = randomBytes(IV_LENGTH);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
-  const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  const payload = Buffer.concat([Buffer.from([VERSION_AES_GCM]), iv, ciphertext, authTag]);
-  return payload.toString("base64");
-}
-
-export function decrypt(ciphertext: string): string {
-  const data = Buffer.from(ciphertext, "base64");
-  if (data.length > 0 && data[0] === VERSION_AES_GCM) {
-    const minLength = 1 + IV_LENGTH + AUTH_TAG_LENGTH;
-    if (data.length < minLength) throw new Error("Ciphertext too short for AES-GCM payload");
-    const iv = data.subarray(1, 1 + IV_LENGTH);
-    const authTag = data.subarray(data.length - AUTH_TAG_LENGTH);
-    const encrypted = data.subarray(1 + IV_LENGTH, data.length - AUTH_TAG_LENGTH);
-    const key = deriveKey();
-    const decipher = createDecipheriv("aes-256-gcm", key, iv);
-    decipher.setAuthTag(authTag);
-    const plaintext = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-    return plaintext.toString("utf8");
-  }
-  return legacyXorDecrypt(new Uint8Array(data));
+  const iv = data.slice(1, 1 + IV_LENGTH);
+  const encrypted = data.slice(1 + IV_LENGTH);
+  const key = await deriveKey();
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, encrypted);
+  return new TextDecoder().decode(plaintext);
 }
 
 export function isDefaultEncryptionKey(): boolean {
-  return config.encryptionKey === DEFAULT_ENCRYPTION_KEY;
+  return config.encryptionKey === DEFAULT_ENCRYPTION_KEY_VALUE;
 }

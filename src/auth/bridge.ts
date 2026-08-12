@@ -1,9 +1,18 @@
-import { config } from "../config";
+import path from "node:path";
 import { db } from "../db/index";
 import { accounts } from "../db/schema";
 import { encrypt } from "../utils/crypto";
 import { broadcast } from "../ws/index";
 import { eq } from "drizzle-orm";
+
+// Bun-only: this file spawns the local Python + Camoufox login script, so it
+// resolves its own paths from process.env instead of the shared Workers
+// `config` (which has no notion of a filesystem or a Python interpreter).
+const authScriptCwd = path.resolve(process.env.AUTH_SCRIPT_CWD || "scripts/auth");
+const pythonPath = path.resolve(
+  process.env.PYTHON_PATH ||
+    path.join(authScriptCwd, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
+);
 
 export interface PostmanLoginResult {
   postman_sid: string;
@@ -26,17 +35,17 @@ export async function loginPostmanAccount(
   headless: boolean,
   onLog?: (log: LoginLogEntry) => void,
 ): Promise<{ success: boolean; accountId?: number; error?: string }> {
-  const scriptPath = config.authScriptCwd + "/postman_login.py";
+  const scriptPath = path.join(authScriptCwd, "postman_login.py");
 
   try {
     const proc = Bun.spawn({
       cmd: [
-        config.pythonPath, scriptPath,
+        pythonPath, scriptPath,
         "--email", email,
         "--password", password,
         ...(headless ? ["--headless"] : []),
       ],
-      cwd: config.authScriptCwd,
+      cwd: authScriptCwd,
       env: {
         ...process.env,
         CAMOUFOX_HEADLESS: headless ? "true" : "false",
@@ -127,7 +136,7 @@ export async function loginPostmanAccount(
       workspace_subdomain: result.workspace_subdomain,
     };
 
-    const encryptedPassword = encrypt(password);
+    const encryptedPassword = await encrypt(password);
     const tokensJson = JSON.stringify(tokens);
 
     const existing = await db.select().from(accounts).where(eq(accounts.email, email)).limit(1);

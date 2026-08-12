@@ -4,7 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ESNext"],
-    "types": ["@cloudflare/workers-types"],
+    "types": ["bun-types", "@cloudflare/workers-types"],
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
@@ -12,17 +12,11 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*.ts"],
-  "exclude": [
-    "node_modules",
-    "dashboard",
-    "src/cli.ts",
-    "src/auth/bridge.ts"
-  ]
+  "include": ["src/cli.ts", "src/auth/bridge.ts"],
+  "exclude": ["node_modules", "dashboard"]
 }

@@ -1,8 +1,14 @@
 node_modules/
 dist/
+dashboard/dist/
 .env
+.dev.vars
 
-# Database
+# Wrangler local state (local D1 sqlite, Durable Object storage, etc.)
+.wrangler/
+worker-configuration.d.ts
+
+# Legacy local sqlite db (pre-D1)
 data/postman2api.db
 data/postman2api.db-journal
 

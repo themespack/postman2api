@@ -3,7 +3,6 @@ import { db } from "../db/index";
 import { accounts, requestLogs } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { encrypt } from "../utils/crypto";
-import { loginPostmanAccount } from "../auth/bridge";
 import { warmupAccount } from "../auth/warmup";
 import { pool } from "../proxy/pool";
 import { broadcast } from "../ws/index";
@@ -37,25 +36,11 @@ accountsRouter.get("/", async (c) => {
   return c.json({ data: sanitized });
 });
 
-// Add account via browser login
-accountsRouter.post("/login", async (c) => {
-  const body = await c.req.json().catch(() => ({})) as { email?: string; password?: string; headless?: boolean };
-  if (!body.email || !body.password) {
-    return c.json({ error: "Email and password required" }, 400);
-  }
-
-  const headless = body.headless ?? false;
-  broadcast({ type: "login_start", data: { email: body.email, headless } });
-
-  const result = await loginPostmanAccount(body.email, body.password, headless);
-  if (!result.success) {
-    return c.json({ error: result.error }, 400);
-  }
-
-  return c.json({ success: true, accountId: result.accountId });
-});
-
-// Add account via manual token paste
+// Add account via manual token paste. This is the only way to add accounts
+// on Workers: browser-automated Google OAuth login requires a Python +
+// Camoufox process, which can't run in the Workers runtime. Run
+// `bun src/cli.ts login <email> <password>` locally to obtain tokens, then
+// paste them in here (or via the dashboard's "Manual" add-account form).
 accountsRouter.post("/", async (c) => {
   const body = await c.req.json().catch(() => ({})) as {
     email?: string;
@@ -85,7 +70,7 @@ accountsRouter.post("/", async (c) => {
 
   const [created] = await db.insert(accounts).values({
     email: body.email,
-    password: encrypt("manual"),
+    password: await encrypt("manual"),
     tokens: JSON.stringify(body.tokens),
     status: "active",
     lastLoginAt: new Date(),

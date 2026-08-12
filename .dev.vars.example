@@ -1,0 +1,6 @@
+# Local secrets for `wrangler dev`. Copy to `.dev.vars` (gitignored).
+# In production, set these with `wrangler secret put <NAME>` instead —
+# never commit real values.
+
+API_KEY=postman2api-secret-key
+ENCRYPTION_KEY=change-this-to-a-random-32-char-hex-string

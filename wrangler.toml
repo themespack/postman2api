@@ -1,0 +1,36 @@
+name = "postman2api"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# ── Secrets (set with `wrangler secret put <NAME>`, never committed) ──
+# API_KEY              — bearer key required on /v1/* requests
+# ENCRYPTION_KEY        — 32-char key used to encrypt stored account passwords
+
+# ── Database ────────────────────────────────────────────────────────
+# Create with: wrangler d1 create postman2api
+# then paste the returned database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "postman2api"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# ── Dashboard static assets (React SPA, built via `cd dashboard && bun run build`) ──
+[assets]
+directory = "./dashboard/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
+# ── WebSocket hub for live dashboard updates ───────────────────────
+[[durable_objects.bindings]]
+name = "WS_HUB"
+class_name = "WSHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WSHub"]
+
+# ── Periodic account health/quota warmup (replaces the old setInterval loop) ──
+[triggers]
+crons = ["*/15 * * * *"]
