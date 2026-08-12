@@ -4,14 +4,23 @@
  * Wrangler (the same one `wrangler dev` uses), via getPlatformProxy().
  *
  * Usage:
- *   bun src/cli.ts login <email> <password>   Login Postman account via browser (Camoufox)
- *   bun src/cli.ts accounts                    List accounts
- *   bun src/cli.ts quota                       Check account quotas
- *   bun src/cli.ts status                      Show config overview
- *   bun src/cli.ts set-admin-key <key>         Set admin password
+ *   bun src/cli.ts login <email> <password>          Login Postman account via browser (Camoufox)
+ *   bun src/cli.ts login-remote <email> <password>   Login locally, then push the tokens to a deployed Worker
+ *   bun src/cli.ts accounts                          List accounts
+ *   bun src/cli.ts quota                             Check account quotas
+ *   bun src/cli.ts status                            Show config overview
+ *   bun src/cli.ts set-admin-key <key>               Set admin password
  *
  * To run the server itself, use `wrangler dev` / `wrangler deploy`.
  * To apply the D1 schema, use `wrangler d1 migrations apply DB --local|--remote`.
+ *
+ * login-remote needs the deployed Worker's URL and API_KEY, since the login
+ * itself always runs against the local D1 (browser automation can't run in
+ * Workers). Set them via env vars or flags:
+ *   POSTMAN2API_REMOTE_URL=https://postman2api.example.workers.dev \
+ *   POSTMAN2API_API_KEY=... \
+ *   bun src/cli.ts login-remote you@example.com yourpassword
+ * or: bun src/cli.ts login-remote you@example.com yourpassword --url=https://... --api-key=...
  */
 
 import { createRequire } from "node:module";
@@ -51,14 +60,18 @@ function usage(): void {
   console.log(`postman2api CLI
 
 Usage:
-  bun src/cli.ts login <email> <password>   Login Postman via browser (Camoufox)
-  bun src/cli.ts accounts                    List accounts
-  bun src/cli.ts quota                       Check account quotas
-  bun src/cli.ts status                      Show config overview
-  bun src/cli.ts set-admin-key <key>         Set admin password
+  bun src/cli.ts login <email> <password>          Login Postman via browser (Camoufox)
+  bun src/cli.ts login-remote <email> <password>   Login locally, push tokens to a deployed Worker
+  bun src/cli.ts accounts                          List accounts
+  bun src/cli.ts quota                             Check account quotas
+  bun src/cli.ts status                            Show config overview
+  bun src/cli.ts set-admin-key <key>               Set admin password
 
 Run the server with: wrangler dev / wrangler deploy
 Apply the schema with: wrangler d1 migrations apply DB --local|--remote
+
+login-remote needs the deployed Worker's URL + API_KEY, via env vars
+(POSTMAN2API_REMOTE_URL, POSTMAN2API_API_KEY) or --url=/--api-key= flags.
 `);
 }
 
@@ -78,6 +91,50 @@ async function cmdLogin(args: string[]): Promise<void> {
   } else {
     console.log(c(`✘ Login failed: ${result.error}`, "red"));
   }
+}
+
+async function cmdLoginRemote(args: string[]): Promise<void> {
+  const positional = args.filter((a) => !a.startsWith("--"));
+  if (positional.length < 2) {
+    console.log(c("Usage: bun src/cli.ts login-remote <email> <password> [--url=...] [--api-key=...]", "red"));
+    return;
+  }
+  const [email, password] = positional;
+  const headless = args.includes("--headless");
+  const remoteUrl = (args.find((a) => a.startsWith("--url=")) || "").slice(6) || process.env.POSTMAN2API_REMOTE_URL;
+  const apiKey = (args.find((a) => a.startsWith("--api-key=")) || "").slice(10) || process.env.POSTMAN2API_API_KEY;
+
+  if (!remoteUrl || !apiKey) {
+    console.log(c("Missing remote URL and/or API key.", "red"));
+    console.log("Set POSTMAN2API_REMOTE_URL / POSTMAN2API_API_KEY env vars, or pass --url=/--api-key=.");
+    return;
+  }
+
+  console.log(c(`Logging in ${email} via Camoufox (headless=${headless})...`, "cyan"));
+  const result = await loginPostmanAccount(email!, password!, headless, (log) => {
+    console.log(c(`  [${log.step}]`, "blue") + ` ${log.msg}`);
+  });
+  if (!result.success) {
+    console.log(c(`✘ Login failed: ${result.error}`, "red"));
+    return;
+  }
+  console.log(c(`✔ Local login OK (id=${result.accountId})`, "green"));
+
+  const [account] = await db.select().from(accounts).where(eq(accounts.email, email!)).limit(1);
+  const tokens = typeof account!.tokens === "string" ? JSON.parse(account!.tokens) : account!.tokens;
+
+  console.log(c(`Pushing tokens to ${remoteUrl}...`, "cyan"));
+  const res = await fetch(`${remoteUrl.replace(/\/$/, "")}/api/accounts`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": apiKey },
+    body: JSON.stringify({ email, tokens }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.log(c(`✘ Remote sync failed (${res.status}): ${JSON.stringify(body)}`, "red"));
+    return;
+  }
+  console.log(c(`✔ Account ${email} synced to remote (id=${(body as any).account?.id})`, "green"));
 }
 
 async function cmdAccounts(): Promise<void> {
@@ -144,6 +201,7 @@ async function main() {
   try {
     switch (cmd) {
       case "login": await cmdLogin(rest); break;
+      case "login-remote": await cmdLoginRemote(rest); break;
       case "accounts": await cmdAccounts(); break;
       case "quota": await cmdQuota(); break;
       case "status": await cmdStatus(); break;

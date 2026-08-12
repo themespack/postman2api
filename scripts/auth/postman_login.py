@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Postman manual login via Playwright (Chrome).
 
-Opens Chrome for the user to manually log in.
+Opens Chrome, using the user's real profile (CHROME_USER_DATA_DIR) so saved
+Google logins/autofill are available, for the user to manually log in.
 Extracts session cookie and workspace info once logged in.
 """
 
@@ -22,6 +23,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 POSTMAN_LOGIN_URL = "https://identity.getpostman.com/login"
 HANDSHAKE_TOKEN_URL = "https://ra.gw.postman.co/v1/handshake/token?agent=cloud"
+# Reuse the user's real Chrome profile so saved Google logins/autofill are
+# available. Chrome only allows one process per profile dir, so the user's
+# regular Chrome must be closed before running this script.
+CHROME_USER_DATA_DIR = os.environ.get("CHROME_USER_DATA_DIR", os.path.expanduser("~/.config/google-chrome"))
+# If Chrome is already running with remote debugging enabled, attach to it and
+# open a new tab instead of launching a separate profile-locked instance.
+# One-time setup: restart Chrome as `google-chrome --remote-debugging-port=9222`.
+CHROME_CDP_URL = os.environ.get("CHROME_CDP_URL", "http://localhost:9222")
 
 def log(step: str, msg: str, level: str = "info"):
     entry = {"step": step, "msg": msg, "level": level, "ts": time.time()}
@@ -60,15 +69,35 @@ async def login_postman(email: str, password: str, headless: bool) -> dict:
     
     async with async_playwright() as p:
         browser = None
+        context = None
+        page = None
+        owns_context = True  # False when attached to the user's already-running Chrome via CDP
         try:
-            log("browser", "Launching Chrome...")
-            browser = await p.chromium.launch(
-                headless=False, # Force false so user can log in
-                channel="chrome",
-                args=["--start-maximized", "--disable-blink-features=AutomationControlled"]
-            )
-            context = await browser.new_context()
-            page = await context.new_page()
+            try:
+                browser = await p.chromium.connect_over_cdp(CHROME_CDP_URL)
+                log("browser", f"Attached to running Chrome ({CHROME_CDP_URL}), opening new tab...")
+                context = browser.contexts[0] if browser.contexts else await browser.new_context()
+                page = await context.new_page()
+                owns_context = False
+            except Exception:
+                log("browser", f"No Chrome with remote debugging at {CHROME_CDP_URL}; launching profile {CHROME_USER_DATA_DIR}...")
+                try:
+                    context = await p.chromium.launch_persistent_context(
+                        CHROME_USER_DATA_DIR,
+                        headless=False, # Force false so user can log in
+                        channel="chrome",
+                        args=["--start-maximized", "--disable-blink-features=AutomationControlled"],
+                    )
+                except Exception as exc:
+                    if "ProcessSingleton" in str(exc) or "SingletonLock" in str(exc) or "in use" in str(exc):
+                        return {
+                            "error": "Chrome profile is locked. Either close all Chrome windows and retry, "
+                                     "or restart Chrome once as `google-chrome --remote-debugging-port=9222` "
+                                     "so this script can attach to it instead."
+                        }
+                    raise
+                page = context.pages[0] if context.pages else await context.new_page()
+                owns_context = True
 
             # Evade basic bot checks (optional but helpful)
             await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -179,14 +208,22 @@ async def login_postman(email: str, password: str, headless: bool) -> dict:
             log("error", f"Unexpected error: {exc}", "error")
             return {"error": f"Login failed: {exc}"}
         finally:
-            if browser:
+            if not owns_context:
+                # Attached to the user's real Chrome via CDP — close only our
+                # tab, never the browser itself.
+                if page:
+                    try:
+                        await page.close()
+                    except Exception:
+                        pass
+            elif context:
                 try:
-                    await browser.close()
+                    await context.close()
                 except Exception:
                     pass
 
 def main():
-    parser = argparse.ArgumentParser(description="Postman manual login via Edge")
+    parser = argparse.ArgumentParser(description="Postman manual login via Chrome")
     parser.add_argument("--email", required=False, help="Email (ignored for manual login)")
     parser.add_argument("--password", required=False, help="Password (ignored for manual login)")
     parser.add_argument("--headless", action="store_true", default=False, help="Ignored")
