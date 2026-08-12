@@ -36,11 +36,17 @@ app.get("/ws", (c) => {
   return stub.fetch(c.req.raw);
 });
 
-// API key auth middleware for /v1/* routes (API consumers)
+// API key auth middleware for /v1/* routes (API consumers).
+// Accepts both the OpenAI convention (`Authorization: Bearer <key>`, used by
+// /v1/chat/completions) and the Anthropic convention (`x-api-key: <key>`,
+// used by /v1/messages) on every /v1/* route, since router/aggregator apps
+// (OpenRouter-style) send whichever header matches the provider type they
+// think they're talking to.
 app.use("/v1/*", async (c, next) => {
-  const auth = c.req.header("Authorization") || "";
+  const bearer = c.req.header("Authorization") || "";
+  const xApiKey = c.req.header("x-api-key") || "";
   const apiKey = await getApiKey();
-  if (auth !== `Bearer ${apiKey}`) {
+  if (bearer !== `Bearer ${apiKey}` && xApiKey !== apiKey) {
     return c.json({ error: { message: "Invalid API key", type: "invalid_api_key" } }, 401);
   }
   await next();
