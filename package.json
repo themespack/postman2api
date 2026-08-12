@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "setup": "bun scripts/setup.ts",
+    "deploy": "bun scripts/setup.ts",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy:worker-only": "wrangler deploy",
     "build": "cd dashboard && bun install && bun run build",
     "typecheck": "bunx tsc --noEmit",
     "typecheck:bun": "bunx tsc --noEmit -p tsconfig.bun.json",

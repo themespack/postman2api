@@ -22,9 +22,27 @@ Hono + TypeScript on Workers. Drizzle ORM over **D1**. A Durable Object (`WSHub`
 
 ```bash
 bun install
+bun run deploy
+```
+
+That single command handles everything and is safe to re-run:
+
+1. Logs in to Cloudflare if you aren't already (`wrangler login`)
+2. Creates the D1 database if it doesn't exist yet, and writes its id into `wrangler.json`
+3. Applies the D1 schema (`migrations/`)
+4. Generates and uploads `API_KEY` / `ENCRYPTION_KEY` secrets if they aren't set yet — printed once at the end, so save them
+5. Builds the dashboard
+6. Deploys the Worker
+
+Durable Object bindings and the Cron Trigger need no separate setup — `wrangler deploy` provisions those straight from `wrangler.json`.
+
+<details>
+<summary>Manual step-by-step (if you'd rather not run the bootstrap script)</summary>
+
+```bash
 cd dashboard && bun install && bun run build && cd ..
 
-# Create the D1 database, then paste its id into wrangler.toml
+# Create the D1 database, then paste its id into wrangler.json
 bunx wrangler d1 create postman2api
 
 # Apply the schema
@@ -36,6 +54,7 @@ bunx wrangler secret put ENCRYPTION_KEY
 
 bunx wrangler deploy
 ```
+</details>
 
 ## Local development
 

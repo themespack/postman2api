@@ -17,6 +17,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/cli.ts", "src/auth/bridge.ts"],
+  "include": ["src/cli.ts", "src/auth/bridge.ts", "scripts/setup.ts"],
   "exclude": ["node_modules", "dashboard"]
 }
