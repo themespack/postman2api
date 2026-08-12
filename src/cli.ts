@@ -14,7 +14,8 @@
  * To apply the D1 schema, use `wrangler d1 migrations apply DB --local|--remote`.
  */
 
-import { getPlatformProxy } from "wrangler";
+import { createRequire } from "node:module";
+import { dirname, resolve as resolvePath } from "node:path";
 import { accounts, settings } from "./db/schema";
 import { eq } from "drizzle-orm";
 import { initDb, db } from "./db/index";
@@ -22,6 +23,20 @@ import { initConfig, config, type Env } from "./config";
 import { initWs } from "./ws/index";
 import { loginPostmanAccount } from "./auth/bridge";
 import { warmupAccount } from "./auth/warmup";
+
+// Bun resolves the bare specifier "wrangler" to the project's own
+// wrangler.json (same basename, JSON extension) instead of the npm
+// package in node_modules — `import { getPlatformProxy } from "wrangler"`
+// then fails with "Export named 'getPlatformProxy' not found in module
+// '.../wrangler.json'". Resolving through the package's own package.json
+// (a different specifier, so the shortcut doesn't kick in) sidesteps it.
+async function loadWrangler(): Promise<typeof import("wrangler")> {
+  const require = createRequire(import.meta.url);
+  const pkgPath = require.resolve("wrangler/package.json");
+  const pkg = require(pkgPath) as { main: string; exports?: { ["."]?: { default?: string } } };
+  const entry = resolvePath(dirname(pkgPath), pkg.exports?.["."]?.default ?? pkg.main);
+  return import(entry);
+}
 
 const C: Record<string, string> = {
   reset: "\x1b[0m", green: "\x1b[32m", yellow: "\x1b[33m",
@@ -120,6 +135,7 @@ async function main() {
   }
   const [cmd, ...rest] = argv;
 
+  const { getPlatformProxy } = await loadWrangler();
   const proxy = await getPlatformProxy<Env>();
   initDb(proxy.env.DB);
   initConfig(proxy.env);
