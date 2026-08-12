@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Postman manual login via Playwright (Microsoft Edge).
+"""Postman manual login via Playwright (Chrome).
 
-Opens Edge for the user to manually log in.
+Opens Chrome for the user to manually log in.
 Extracts session cookie and workspace info once logged in.
 """
 
@@ -61,11 +61,11 @@ async def login_postman(email: str, password: str, headless: bool) -> dict:
     async with async_playwright() as p:
         browser = None
         try:
-            log("browser", "Launching Microsoft Edge...")
+            log("browser", "Launching Chrome...")
             browser = await p.chromium.launch(
                 headless=False, # Force false so user can log in
-                channel="msedge",
-                args=["--start-maximized"]
+                channel="chrome",
+                args=["--start-maximized", "--disable-blink-features=AutomationControlled"]
             )
             context = await browser.new_context()
             page = await context.new_page()
